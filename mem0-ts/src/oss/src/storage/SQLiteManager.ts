@@ -1,10 +1,32 @@
-import sqlite3 from "sqlite3";
 import { HistoryManager } from "./base";
 
+/**
+ * NOTE: sqlite3 is intentionally NOT imported at module top-level.
+ * This file lazily requires sqlite3 inside the constructor so that
+ * simply importing the module does NOT attempt to load the sqlite3
+ * native binary. This prevents runtime errors in environments like
+ * AWS Lambda when callers disable history (so the SQLite manager is
+ * never instantiated).
+ */
+
 export class SQLiteManager implements HistoryManager {
-  private db: sqlite3.Database;
+  private db: any;
 
   constructor(dbPath: string) {
+    // Lazy require to avoid loading sqlite3 on module import.
+    // sqlite3 is only loaded when an instance is actually constructed.
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    let sqlite3: any;
+    try {
+      // Try to require sqlite3 only when needed
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      sqlite3 = require("sqlite3");
+    } catch (err) {
+      throw new Error(
+        "sqlite3 module not found. To use the sqlite history provider install sqlite3 in your application (e.g. `npm install sqlite3`). Alternatively configure a different history provider or set `disableHistory: true`.",
+      );
+    }
+
     this.db = new sqlite3.Database(dbPath);
     this.init().catch(console.error);
   }
@@ -26,7 +48,7 @@ export class SQLiteManager implements HistoryManager {
 
   private async run(sql: string, params: any[] = []): Promise<void> {
     return new Promise((resolve, reject) => {
-      this.db.run(sql, params, (err) => {
+      this.db.run(sql, params, (err: any) => {
         if (err) reject(err);
         else resolve();
       });
@@ -35,7 +57,7 @@ export class SQLiteManager implements HistoryManager {
 
   private async all(sql: string, params: any[] = []): Promise<any[]> {
     return new Promise((resolve, reject) => {
-      this.db.all(sql, params, (err, rows) => {
+      this.db.all(sql, params, (err: any, rows: any[]) => {
         if (err) reject(err);
         else resolve(rows);
       });
@@ -80,6 +102,10 @@ export class SQLiteManager implements HistoryManager {
   }
 
   close(): void {
-    this.db.close();
+    try {
+      this.db.close();
+    } catch (e) {
+      // ignore close errors
+    }
   }
 }
